@@ -1,0 +1,306 @@
+import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart';
+import 'package:provider/provider.dart';
+
+// Modelo do Planeta
+class Planeta {
+  int? id;
+  String nome;
+  double distanciaSol;
+  double tamanho;
+  String? apelido;
+
+  Planeta({
+    this.id,
+    required this.nome,
+    required this.distanciaSol,
+    required this.tamanho,
+    this.apelido,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'nome': nome,
+      'distancia_sol': distanciaSol,
+      'tamanho': tamanho,
+      'apelido': apelido,
+    };
+  }
+
+  factory Planeta.fromMap(Map<String, dynamic> map) {
+    return Planeta(
+      id: map['id'],
+      nome: map['nome'],
+      distanciaSol: map['distancia_sol'],
+      tamanho: map['tamanho'],
+      apelido: map['apelido'],
+    );
+  }
+}
+
+// Classe de Banco de Dados (SQLite)
+class DBHelper {
+  static Database? _database;
+
+  static Future<Database> getDatabase() async {
+    if (_database != null) return _database!;
+    _database = await _initDatabase();
+    return _database!;
+  }
+
+  static Future<Database> _initDatabase() async {
+    final dbPath = await getDatabasesPath();
+    return openDatabase(
+      join(dbPath, 'planetas.db'),
+      onCreate: (db, version) {
+        return db.execute(
+          '''CREATE TABLE planetas(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            distancia_sol REAL NOT NULL,
+            tamanho REAL NOT NULL,
+            apelido TEXT)''',
+        );
+      },
+      version: 1,
+    );
+  }
+
+  static Future<int> insertPlaneta(Planeta planeta) async {
+    final db = await getDatabase();
+    return await db.insert('planetas', planeta.toMap());
+  }
+
+  static Future<List<Planeta>> getPlanetas() async {
+    final db = await getDatabase();
+    final List<Map<String, dynamic>> maps = await db.query('planetas');
+    return List.generate(maps.length, (i) {
+      return Planeta.fromMap(maps[i]);
+    });
+  }
+
+  static Future<int> updatePlaneta(Planeta planeta) async {
+    final db = await getDatabase();
+    return await db.update(
+      'planetas',
+      planeta.toMap(),
+      where: 'id = ?',
+      whereArgs: [planeta.id],
+    );
+  }
+
+  static Future<int> deletePlaneta(int id) async {
+    final db = await getDatabase();
+    return await db.delete(
+      'planetas',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+}
+
+// ViewModel (Gerenciamento de Estado com Provider)
+class PlanetaViewModel extends ChangeNotifier {
+  List<Planeta> _planetas = [];
+
+  List<Planeta> get planetas => _planetas;
+
+  Future<void> loadPlanetas() async {
+    _planetas = await DBHelper.getPlanetas();
+    notifyListeners();
+  }
+
+  Future<void> addPlaneta(Planeta planeta) async {
+    await DBHelper.insertPlaneta(planeta);
+    await loadPlanetas();
+  }
+
+  Future<void> updatePlaneta(Planeta planeta) async {
+    await DBHelper.updatePlaneta(planeta);
+    await loadPlanetas();
+  }
+
+  Future<void> deletePlaneta(int id) async {
+    await DBHelper.deletePlaneta(id);
+    await loadPlanetas();
+  }
+}
+
+// Tela de Listagem de Planetas
+class HomePage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Planetas')),
+      body: Consumer<PlanetaViewModel>(
+        builder: (context, viewModel, child) {
+          return ListView.builder(
+            itemCount: viewModel.planetas.length,
+            itemBuilder: (context, index) {
+              final planeta = viewModel.planetas[index];
+              return ListTile(
+                title: Text(planeta.nome),
+                subtitle: Text(planeta.apelido ?? 'Sem apelido'),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => PlanetDetailPage(planeta: planeta),
+                    ),
+                  );
+                },
+                trailing: IconButton(
+                  icon: Icon(Icons.delete),
+                  onPressed: () {
+                    viewModel.deletePlaneta(planeta.id!);
+                  },
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => AddEditPlanetPage()),
+          );
+        },
+        child: Icon(Icons.add),
+      ),
+    );
+  }
+}
+
+// Tela de Detalhes do Planeta
+class PlanetDetailPage extends StatelessWidget {
+  final Planeta planeta;
+
+  PlanetDetailPage({required this.planeta});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(planeta.nome)),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Nome: ${planeta.nome}', style: TextStyle(fontSize: 18)),
+            Text('Distância do Sol: ${planeta.distanciaSol} AU', style: TextStyle(fontSize: 18)),
+            Text('Tamanho: ${planeta.tamanho} km', style: TextStyle(fontSize: 18)),
+            Text('Apelido: ${planeta.apelido ?? 'Não informado'}', style: TextStyle(fontSize: 18)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Tela de Adição/Alteração de Planetas
+class AddEditPlanetPage extends StatefulWidget {
+  @override
+  _AddEditPlanetPageState createState() => _AddEditPlanetPageState();
+}
+
+class _AddEditPlanetPageState extends State<AddEditPlanetPage> {
+  final _formKey = GlobalKey<FormState>();
+  final _nomeController = TextEditingController();
+  final _distanciaSolController = TextEditingController();
+  final _tamanhoController = TextEditingController();
+  final _apelidoController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Adicionar Planeta')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: _nomeController,
+                decoration: InputDecoration(labelText: 'Nome'),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Nome é obrigatório';
+                  }
+                  return null;
+                },
+              ),
+              TextFormField(
+                controller: _distanciaSolController,
+                decoration: InputDecoration(labelText: 'Distância do Sol'),
+                keyboardType: TextInputType.number,
+                validator: (value) {
+                  if (value == null || value.isEmpty || double.tryParse(value) == null || double.parse(value) <= 0) {
+                    return 'Distância inválida';
+                  }
+                  return null;
+                },
+              ),
+              TextFormField(
+                controller: _tamanhoController,
+                decoration: InputDecoration(labelText: 'Tamanho'),
+                keyboardType: TextInputType.number,
+                validator: (value) {
+                  if (value == null || value.isEmpty || double.tryParse(value) == null || double.parse(value) <= 0) {
+                    return 'Tamanho inválido';
+                  }
+                  return null;
+                },
+              ),
+              TextFormField(
+                controller: _apelidoController,
+                decoration: InputDecoration(labelText: 'Apelido (opcional)'),
+              ),
+              SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () async {
+                  if (_formKey.currentState!.validate()) {
+                    final planeta = Planeta(
+                      nome: _nomeController.text,
+                      distanciaSol: double.parse(_distanciaSolController.text),
+                      tamanho: double.parse(_tamanhoController.text),
+                      apelido: _apelidoController.text.isEmpty ? null : _apelidoController.text,
+                    );
+                    await Provider.of<PlanetaViewModel>(context, listen: false).addPlaneta(planeta);
+                    Navigator.pop(context);
+                  }
+                },
+                child: Text('Salvar'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Função principal
+void main() {
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Planetas',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: ChangeNotifierProvider(
+        create: (context) => PlanetaViewModel(),
+        child: HomePage(),
+      ),
+    );
+  }
+}
